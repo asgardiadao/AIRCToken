@@ -35,15 +35,16 @@ contract AsgardiaCrowd {
     IERC20 AIRCToken;
 
     address private _owner;
-    uint internal currentRound = 0;
+    uint256 internal currentRound = 0;
     uint256 public totalCrowdfundingBNB = 0;
     uint256 private oneDay = 1 days;
     uint256 private threeDays = 3 days;
     uint256 private thirtyDays = 30 days;
+
     bool private bBurned = false;
 
     // $AIRC Contract Address
-    address tokenContract = 0x8F766c4632ff8A746D4333755E1E60672f544B1b;
+    address tokenContract = 0xf5060207E2A0bc325873CCec5cC0Bc726DB72db8;
 
     event CrowdSuccess(address addr, uint256 amount);
     event ReleaseSuccess(address addr, uint256 amount);
@@ -53,7 +54,7 @@ contract AsgardiaCrowd {
      * @dev fundraising data for each round
      */
     struct RoundData {
-        uint roundIndex;
+        uint256 roundIndex;
         uint256 totalCrowdfundingAIRC;
         uint256 totalCrowdfundingBNB;
         uint256 tokenPrice;
@@ -117,8 +118,7 @@ contract AsgardiaCrowd {
      * @dev withdraw assets to add liquidity and purchase land
      */
     function withdraw() public onlyOwner payable {
-        payable(msg.sender).transfer(totalCrowdfundingBNB);
-        totalCrowdfundingBNB = 0;
+        payable(msg.sender).transfer(msg.value);
     }
 
     /**
@@ -129,7 +129,7 @@ contract AsgardiaCrowd {
         require(bBurned == false, "has been burning");
 
         uint256 needBurnAmount = 0;
-        for (uint i = 0; i < 3; i++){
+        for (uint8 i = 0; i < currentRound; i++){
             RoundData memory roundData = roundsMap[i];
             needBurnAmount += roundData.totalCrowdfundingAIRC - roundData.successfulCrowdfundingAIRC;
         }
@@ -178,11 +178,11 @@ contract AsgardiaCrowd {
     /**
      * @dev get current round data
      */
-    function currentRoundData() public allowCrowdfundingCondition view returns (RoundData memory) {
+    function currentRoundData() public view returns (RoundData memory) {
         return roundsMap[currentRound - 1];
     }
 
-    function getRoundData(uint roundIndex) public allowCrowdfundingCondition view returns (RoundData memory){
+    function getRoundData(uint roundIndex) public view returns (RoundData memory){
         return roundsMap[roundIndex];
     }
 
@@ -196,10 +196,10 @@ contract AsgardiaCrowd {
      * - `startTime` fundraising start time
      * - `endTime` fundraising end time
      */
-    function startNextRounds(uint256 totalAIRC, uint256 totalBNB, uint256 tokenPrice, uint256 startTime, uint256 endTime) public onlyOwner returns (bool) {
+    function startNextRound(uint256 totalAIRC, uint256 totalBNB, uint256 tokenPrice, uint256 startTime, uint256 endTime) public onlyOwner returns (bool) {
         require(currentRound < 3, "the crowdfunding is over");
         if (currentRound > 0){
-            require(roundsMap[currentRound - 1].endTime <= block.timestamp, "the crowdfunding hasn't started yet!");
+            require(block.timestamp >= roundsMap[currentRound - 1].endTime, "The crowdfunding isn't over yet");
         }
         currentRound += 1;
         roundsMap[currentRound - 1] = RoundData({
@@ -248,7 +248,8 @@ contract AsgardiaCrowd {
             lastReleaseTime = roundsMap[2].endTime + thirtyDays;
         }
 
-        uint256 unReleaseDays = (block.timestamp - lastReleaseTime) / 1 days;
+        uint256 unReleaseDays = 0;
+        unchecked { unReleaseDays = (block.timestamp - lastReleaseTime) / oneDay;  }
         if (unReleaseDays > 0){
             uint256 dayOfAIRC = _releaseRecord.total / 100;
             uint256 releaseToken = dayOfAIRC * unReleaseDays;
@@ -289,8 +290,11 @@ contract AsgardiaCrowd {
     function releasableInfo(address addr) public view returns (uint256 availableAmount, uint256 unreleaseAmount){
         uint256 _availableAmount = 0;
         uint256 _unreleaseAmount = 0;
+        if (currentRound == 0){
+            return (0, 0);
+        }
         CrowdfundingLockRecord memory releaseRecord = releaseMap[addr];
-        if (block.timestamp >= roundsMap[2].endTime + threeDays){
+        if (block.timestamp >= roundsMap[currentRound - 1].endTime + threeDays){
             _availableAmount += releaseRecord.unreleased;
         }
         _unreleaseAmount += releaseRecord.unreleased;
@@ -298,16 +302,20 @@ contract AsgardiaCrowd {
         CrowdfundingLockRecord memory linearReleaseRecord = linearReleaseMap[addr];
         uint256 lastReleaseTime = linearReleaseRecord.lastReleaseTime;
         if (lastReleaseTime <= 0){
-            lastReleaseTime = roundsMap[2].endTime + thirtyDays;
+            lastReleaseTime = roundsMap[currentRound - 1].endTime + thirtyDays;
         }
-        uint256 unReleaseDays = (block.timestamp - lastReleaseTime) / 1 days;
-        if (unReleaseDays > 0){
-            uint256 dayOfAIRC = linearReleaseRecord.total / 100;
-            uint256 releaseToken = dayOfAIRC * unReleaseDays;
-            if (releaseToken > 0 && releaseToken <= linearReleaseRecord.unreleased){
-                _availableAmount += releaseToken;
+        if (lastReleaseTime <= block.timestamp){
+            uint256 unReleaseDays = 0;
+            unchecked { unReleaseDays = (block.timestamp - lastReleaseTime) / oneDay;  }
+            if (unReleaseDays > 0){
+                uint256 dayOfAIRC = linearReleaseRecord.total / 100;
+                uint256 releaseToken = dayOfAIRC * unReleaseDays;
+                if (releaseToken > 0 && releaseToken <= linearReleaseRecord.unreleased){
+                    _availableAmount += releaseToken;
+                }
             }
         }
+
         _unreleaseAmount += linearReleaseRecord.unreleased;
         return (_availableAmount, _unreleaseAmount);
     }
